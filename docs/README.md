@@ -32,4 +32,3 @@ Here's a complete list of Mermaid diagrams for the NATS Security System:
 17. [Security Rule Evaluation Process](diagrams/Process%20Diagrams/Security%20Rule%20Evaluation%20Process.mermid)
 18. [Agent Monitoring Process](diagrams/Process%20Diagrams/Agent%20Monitoring%20Process.mermid)
 
-Which diagram would you like me to create first?
