@@ -1,0 +1,32 @@
+# Generated files
+/target/
+**/*.rs.bk
+Cargo.lock
+
+# IDE specific files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Debug files
+*.pdb
+
+# Environment files
+.env
+.env.local
+
+# OS specific files
+.DS_Store
+Thumbs.db
+
+# Documentation
+/doc/
+/target/doc/
+
+# Optional: dependencies directory if you use a custom location
+/vendor/
+
+# Backup files
+*.bak
+*.backup
