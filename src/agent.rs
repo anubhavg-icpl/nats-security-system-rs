@@ -46,8 +46,7 @@ impl Agent {
             custom_id.clone()
         } else {
             let username = whoami::username();
-            // Using hostname() is deprecated but still functional for now
-            let hostname = whoami::fallible::hostname().unwrap_or_else(|_| "unknown".to_string());
+            let hostname = whoami::hostname();
             let prefix = config.id_prefix.as_deref().unwrap_or("");
             
             if !prefix.is_empty() {
