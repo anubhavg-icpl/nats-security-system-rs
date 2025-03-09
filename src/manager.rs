@@ -1,63 +1,131 @@
-// Security Monitoring Manager
-//
-// This manager performs the following functions:
-// - Receives and processes security events from agents
-// - Maintains agent statuses and configurations
-// - Sends commands to agents
-// - Provides an API for monitoring and administration
-
-use async_nats::ConnectOptions;
-use futures::StreamExt;
+use crate::api::ManagerInterface;
 use crate::common::{
-    AgentCommand, AgentHeartbeat, AgentRegistration, CommandResponse, SecurityAlert, SecurityEvent
+    AgentCommand, AgentHeartbeat, AgentRegistration, AgentInfo, CommandResponse, SecurityAlert, SecurityEvent,
+    current_timestamp,
 };
-use serde::Serialize;
+use crate::config::{ManagerConfig, configure_nats_connection};
+use async_nats::Client as NatsClient;
+use anyhow::{Context, Result};
+use async_trait::async_trait;
+use futures::StreamExt;
+use log::{debug, error, info, warn};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, SystemTime};
-use tokio::task;
+use std::sync::{Arc, Mutex, RwLock};
+use std::time::Duration;
+use tokio::sync::mpsc;
 use tokio::time::sleep;
 use uuid::Uuid;
 
-// Agent status tracking
-#[derive(Debug, Clone, Serialize)]
-struct AgentStatus {
-    agent_id: String,
-    hostname: String,
-    os: String,
-    ip: String,
-    version: String,
-    last_seen: u64,
-    status: String,
+/// Rule for security event matching and alert generation
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SecurityRule {
+    /// Rule unique identifier
+    pub id: String,
+    /// Rule name
+    pub name: String,
+    /// Rule description
+    pub description: String,
+    /// Type of events this rule applies to
+    pub event_type: String,
+    /// Conditions to match in event details
+    pub conditions: HashMap<String, String>,
+    /// Severity level for alerts (0-10)
+    pub severity: u8,
+    /// Action to take when rule matches
+    pub action: String,
 }
 
-// Rule for event matching and alerting
-#[derive(Debug, Clone)]
-struct SecurityRule {
-    id: String,
-    name: String,
-    description: String,
-    event_type: String,
-    conditions: HashMap<String, String>,
-    severity: u8,
-    action: String,
-}
-
-// Manager struct to coordinate everything
-struct SecurityManager {
-    nats_client: async_nats::Client,
-    agents: Arc<Mutex<HashMap<String, AgentStatus>>>,
-    rules: Arc<Mutex<Vec<SecurityRule>>>,
+/// Manager state for agent and alert management
+pub struct Manager {
+    /// NATS client for messaging
+    nats_client: NatsClient,
+    /// Configuration
+    config: ManagerConfig,
+    /// Known agents and their status
+    agents: Arc<RwLock<HashMap<String, AgentInfo>>>,
+    /// Security rules
+    rules: Arc<RwLock<Vec<SecurityRule>>>,
+    /// Generated alerts
     alerts: Arc<Mutex<Vec<SecurityAlert>>>,
 }
 
-impl SecurityManager {
-    // Initialize a new manager
-    async fn new(nats_url: &str) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
-        // Connect to NATS server
-        let client = ConnectOptions::new().connect(nats_url).await?;
+#[async_trait]
+impl ManagerInterface for Manager {
+    type Agent = AgentInfo;
+    
+    /// Get all registered agents
+    async fn get_agents(&self) -> Result<Vec<AgentInfo>, Box<dyn std::error::Error + Send + Sync>> {
+        let agents = self.agents.read().unwrap();
+        let result = agents.values().cloned().collect();
+        Ok(result)
+    }
+    
+    /// Get recent alerts
+    async fn get_alerts(
+        &self,
+        limit: usize,
+    ) -> Result<Vec<SecurityAlert>, Box<dyn std::error::Error + Send + Sync>> {
+        let alerts = self.alerts.lock().unwrap();
+        let result = alerts
+            .iter()
+            .rev()
+            .take(limit)
+            .cloned()
+            .collect();
+        Ok(result)
+    }
+    
+    /// Send a command to an agent
+    async fn send_command(
+        &self,
+        agent_id: &str,
+        action: &str,
+        parameters: HashMap<String, String>,
+    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+        // Check if agent exists and is active
+        {
+            let agents = self.agents.read().unwrap();
+            if let Some(agent) = agents.get(agent_id) {
+                if agent.status != "active" {
+                    return Err(format!("Agent {} is not active (status: {})", agent_id, agent.status).into());
+                }
+            } else {
+                return Err(format!("Agent {} not found", agent_id).into());
+            }
+        }
         
-        // Initialize with default rules
+        // Generate command ID
+        let command_id = Uuid::new_v4().to_string();
+        
+        let command = AgentCommand {
+            action: action.to_string(),
+            parameters,
+            id: command_id.clone(),
+        };
+        
+        let command_data = serde_json::to_vec(&command)?;
+        let command_subject = format!("security.command.{}", agent_id);
+        
+        self.nats_client.publish(command_subject, command_data.into()).await?;
+        
+        info!("Command sent to agent {}: {} (ID: {})", agent_id, action, command_id);
+        
+        Ok(command_id)
+    }
+}
+
+impl Manager {
+    /// Create a new manager instance
+    pub async fn new(config: ManagerConfig) -> Result<Self> {
+        // Connect to NATS server
+        let nats_client = configure_nats_connection(
+            &config.nats,
+            config.reconnect_attempts,
+            config.reconnect_delay_seconds,
+        ).await.context("Failed to connect to NATS server")?;
+        
+        // Create default rules
         let mut default_rules = Vec::new();
         
         // Rule for detecting file integrity changes in sensitive files
@@ -90,56 +158,54 @@ impl SecurityManager {
             action: "alert".to_string(),
         });
         
-        Ok(SecurityManager {
-            nats_client: client,
-            agents: Arc::new(Mutex::new(HashMap::new())),
-            rules: Arc::new(Mutex::new(default_rules)),
+        info!("Manager created with {} default rules", default_rules.len());
+        
+        Ok(Self {
+            nats_client,
+            config,
+            agents: Arc::new(RwLock::new(HashMap::new())),
+            rules: Arc::new(RwLock::new(default_rules)),
             alerts: Arc::new(Mutex::new(Vec::new())),
         })
     }
-
-    // Start the manager services
-    async fn start(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        // Subscribe to agent registrations
+    
+    /// Start the manager's main loop
+    pub async fn run(&self, mut shutdown_rx: mpsc::Receiver<()>) -> Result<()> {
+        // Start listeners
         self.start_registration_listener().await?;
-        
-        // Subscribe to agent heartbeats
         self.start_heartbeat_listener().await?;
-        
-        // Subscribe to security events
         self.start_event_listener().await?;
-        
-        // Subscribe to command responses
         self.start_response_listener().await?;
-        
-        // Start agent status monitor (check for inactive agents)
         self.start_agent_monitor().await?;
         
-        println!("Security manager started successfully");
+        info!("Manager started successfully");
         
-        // Keep the manager running
-        loop {
-            sleep(Duration::from_secs(60)).await;
+        // Wait for shutdown signal
+        tokio::select! {
+            _ = shutdown_rx.recv() => {
+                info!("Shutdown signal received, terminating manager");
+            }
         }
+        
+        info!("Manager terminating");
+        Ok(())
     }
-
-    // Start listener for agent registrations
-    async fn start_registration_listener(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let mut registration_sub = self.nats_client.subscribe("security.register").await?;
+    
+    /// Start listener for agent registrations
+    async fn start_registration_listener(&self) -> Result<()> {
+        let mut registration_sub = self.nats_client.subscribe("security.register").await
+            .context("Failed to subscribe to registration subject")?;
         
         let agents = self.agents.clone();
         
         tokio::spawn(async move {
             while let Some(msg) = registration_sub.next().await {
                 if let Ok(registration) = serde_json::from_slice::<AgentRegistration>(&msg.payload) {
-                    println!("Agent registered: {}", registration.agent_id);
+                    info!("Agent registered: {}", registration.agent_id);
                     
-                    let now = SystemTime::now()
-                        .duration_since(SystemTime::UNIX_EPOCH)
-                        .unwrap_or(Duration::from_secs(0))
-                        .as_secs();
+                    let now = current_timestamp();
                     
-                    let agent_status = AgentStatus {
+                    let agent_info = AgentInfo {
                         agent_id: registration.agent_id.clone(),
                         hostname: registration.hostname.clone(),
                         os: registration.os.clone(),
@@ -147,308 +213,246 @@ impl SecurityManager {
                         version: registration.version.clone(),
                         last_seen: now,
                         status: "active".to_string(),
+                        uptime: 0,
+                        capabilities: vec!["file_integrity".to_string()],
                     };
                     
-                    let mut agents_lock = agents.lock().unwrap();
-                    agents_lock.insert(registration.agent_id.clone(), agent_status);
+                    let mut agents_write = agents.write().unwrap();
+                    agents_write.insert(registration.agent_id.clone(), agent_info);
+                    
+                    debug!("Currently tracking {} agents", agents_write.len());
+                } else {
+                    warn!("Received invalid registration message");
                 }
             }
         });
         
         Ok(())
     }
-
-    // Start listener for agent heartbeats
-    async fn start_heartbeat_listener(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let mut heartbeat_sub = self.nats_client.subscribe("security.heartbeat").await?;
+    
+    /// Start listener for agent heartbeats
+    async fn start_heartbeat_listener(&self) -> Result<()> {
+        let mut heartbeat_sub = self.nats_client.subscribe("security.heartbeat").await
+            .context("Failed to subscribe to heartbeat subject")?;
         
         let agents = self.agents.clone();
         
         tokio::spawn(async move {
             while let Some(msg) = heartbeat_sub.next().await {
                 if let Ok(heartbeat) = serde_json::from_slice::<AgentHeartbeat>(&msg.payload) {
-                    let mut agents_lock = agents.lock().unwrap();
+                    debug!("Heartbeat from agent: {}", heartbeat.agent_id);
                     
-                    if let Some(agent) = agents_lock.get_mut(&heartbeat.agent_id) {
+                    let mut agents_write = agents.write().unwrap();
+                    
+                    if let Some(agent) = agents_write.get_mut(&heartbeat.agent_id) {
+                        // Calculate uptime based on previous last_seen
+                        let previous_last_seen = agent.last_seen;
                         agent.last_seen = heartbeat.timestamp;
                         agent.status = heartbeat.status.clone();
+                        
+                        if previous_last_seen > 0 {
+                            let uptime_delta = heartbeat.timestamp.saturating_sub(previous_last_seen);
+                            agent.uptime += uptime_delta;
+                        }
+                    } else {
+                        // We got a heartbeat from an unknown agent, request registration
+                        debug!("Heartbeat from unknown agent: {}", heartbeat.agent_id);
+                        // In a production system, we might want to send a command to this agent
+                        // to re-register, but we'll skip that for this example
                     }
-                    // MutexGuard dropped here
+                } else {
+                    warn!("Received invalid heartbeat message");
                 }
             }
         });
         
         Ok(())
     }
-
-    // Start listener for security events
-    async fn start_event_listener(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let mut event_sub = self.nats_client.subscribe("security.event.*").await?;
+    
+    /// Start listener for security events
+    async fn start_event_listener(&self) -> Result<()> {
+        let mut event_sub = self.nats_client.subscribe("security.event.*").await
+            .context("Failed to subscribe to event subject")?;
         
         let rules = self.rules.clone();
         let alerts = self.alerts.clone();
         let client = self.nats_client.clone();
+        let alert_retention = self.config.alert_retention_count;
         
         tokio::spawn(async move {
             while let Some(msg) = event_sub.next().await {
                 if let Ok(event) = serde_json::from_slice::<SecurityEvent>(&msg.payload) {
-                    println!("Received security event from {}: {}", event.agent_id, event.description);
+                    info!("Received security event from {}: {} (severity: {})", 
+                         event.agent_id, event.description, event.severity);
                     
                     // Check event against rules
-                    let triggered_alerts = check_event_against_rules(&event, &rules);
+                    let triggered_alerts = Self::check_event_against_rules(&event, &rules);
                     
-                    // Process each alert separately to avoid holding mutex during await
+                    // Process each alert separately
                     for alert in triggered_alerts {
-                        // First, store the alert
+                        debug!("Rule triggered: {}", alert.rule_name);
+                        
+                        // First, store the alert with retention limit
                         {
                             let mut alerts_lock = alerts.lock().unwrap();
+                            
+                            // Add the new alert
                             alerts_lock.push(alert.clone());
-                        } // alerts_lock is dropped here
-                        
-                        // Then publish it (with await)
-                        if let Ok(alert_data) = serde_json::to_vec(&alert) {
-                            if let Err(e) = client.publish("security.alert", alert_data.into()).await {
-                                eprintln!("Failed to publish alert: {}", e);
+                            
+                            // Enforce retention limit
+                            if alerts_lock.len() > alert_retention {
+                                let new_start = alerts_lock.len().saturating_sub(alert_retention);
+                                let mut new_alerts = Vec::new();
+                                
+                                // Copy the most recent alerts (up to alert_retention count)
+                                for i in new_start..alerts_lock.len() {
+                                    if let Some(alert) = alerts_lock.get(i) {
+                                        new_alerts.push(alert.clone());
+                                    }
+                                }
+                                
+                                // Replace the alerts with just the most recent ones
+                                *alerts_lock = new_alerts;
                             }
                         }
+                        
+                        // Then publish it
+                        if let Ok(alert_data) = serde_json::to_vec(&alert) {
+                            if let Err(e) = client.publish("security.alert", alert_data.into()).await {
+                                error!("Failed to publish alert: {}", e);
+                            } else {
+                                debug!("Alert published: {}", alert.id);
+                            }
+                        } else {
+                            error!("Failed to serialize alert");
+                        }
                     }
+                } else {
+                    warn!("Received invalid security event message");
                 }
             }
         });
         
         Ok(())
     }
-
-    // Start listener for command responses
-    async fn start_response_listener(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let mut response_sub = self.nats_client.subscribe("security.response.*").await?;
+    
+    /// Start listener for command responses
+    async fn start_response_listener(&self) -> Result<()> {
+        let mut response_sub = self.nats_client.subscribe("security.response.*").await
+            .context("Failed to subscribe to response subject")?;
         
         tokio::spawn(async move {
             while let Some(msg) = response_sub.next().await {
                 if let Ok(response) = serde_json::from_slice::<CommandResponse>(&msg.payload) {
-                    println!("Received command response from {}: {} - {}", 
-                        response.agent_id, response.status, response.data);
+                    info!("Command response from {}: {} - {}", 
+                         response.agent_id, response.status, response.data);
                     
-                    // In a real system, you would store responses and correlate with commands
+                    // In a production system, we would store command responses and
+                    // correlate them with issued commands, notify waiting clients, etc.
+                } else {
+                    warn!("Received invalid command response message");
                 }
             }
         });
         
         Ok(())
     }
-
-    // Start agent monitor to detect inactive agents
-    async fn start_agent_monitor(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    
+    /// Start agent monitor to detect inactive agents
+    async fn start_agent_monitor(&self) -> Result<()> {
         let agents = self.agents.clone();
+        let agent_timeout = self.config.agent_timeout_seconds;
         
         tokio::spawn(async move {
             loop {
-                let now = SystemTime::now()
-                    .duration_since(SystemTime::UNIX_EPOCH)
-                    .unwrap_or(Duration::from_secs(0))
-                    .as_secs();
+                let now = current_timestamp();
                 
-                // Scope the MutexGuard to avoid holding it across await points
+                // Check agent status periodically
                 {
-                    let mut agents_lock = agents.lock().unwrap();
+                    let mut agents_write = agents.write().unwrap();
                     
-                    for (_, agent) in agents_lock.iter_mut() {
-                        // If no heartbeat received for more than 5 minutes, mark as inactive
-                        if now - agent.last_seen > 300 && agent.status != "inactive" {
-                            println!("Agent {} marked as inactive", agent.agent_id);
+                    for (_, agent) in agents_write.iter_mut() {
+                        // If no heartbeat received for more than the configured timeout, mark as inactive
+                        if now.saturating_sub(agent.last_seen) > agent_timeout && agent.status != "inactive" {
+                            info!("Agent {} marked as inactive (no heartbeat for {} seconds)",
+                                 agent.agent_id, now.saturating_sub(agent.last_seen));
                             agent.status = "inactive".to_string();
                             
-                            // In a real system, you might want to generate an alert here
+                            // In a real system, we might want to generate an alert here
                         }
                     }
-                } // MutexGuard is dropped here before the await point
+                }
                 
-                sleep(Duration::from_secs(60)).await;
+                // Check every 10 seconds
+                sleep(Duration::from_secs(10)).await;
             }
         });
         
         Ok(())
     }
-
-    // Send command to specific agent
-    async fn send_command_to_agent(&self, agent_id: &str, action: &str, 
-                                   parameters: HashMap<String, String>) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-        // Generate command ID
-        let command_id = Uuid::new_v4().to_string();
-        
-        let command = AgentCommand {
-            action: action.to_string(),
-            parameters,
-            id: command_id.clone(),
-        };
-        
-        let command_data = serde_json::to_vec(&command)?;
-        let command_subject = format!("security.command.{}", agent_id);
-        
-        self.nats_client.publish(command_subject, command_data.into()).await?;
-        
-        println!("Command sent to agent {}: {} (ID: {})", agent_id, action, command_id);
-        
-        Ok(command_id)
-    }
-
-    // Get agent statuses
-    fn get_agent_statuses(&self) -> Vec<AgentStatus> {
-        let agents_lock = self.agents.lock().unwrap();
-        agents_lock.values().cloned().collect()
-    }
-
-    // Get recent alerts
-    fn get_recent_alerts(&self, limit: usize) -> Vec<SecurityAlert> {
-        let alerts_lock = self.alerts.lock().unwrap();
-        alerts_lock.iter()
-            .rev()
-            .take(limit)
-            .cloned()
-            .collect()
-    }
-
-    // Add a new security rule
-    fn add_rule(&self, rule: SecurityRule) {
-        let mut rules_lock = self.rules.lock().unwrap();
-        rules_lock.push(rule);
-    }
-}
-
-// Check if a security event matches any rules
-fn check_event_against_rules(event: &SecurityEvent, 
-                            rules: &Arc<Mutex<Vec<SecurityRule>>>) -> Vec<SecurityAlert> {
-    let rules_lock = rules.lock().unwrap();
-    let mut triggered_alerts = Vec::new();
     
-    for rule in rules_lock.iter() {
-        // Check if event type matches
-        if rule.event_type != event.event_type {
-            continue;
-        }
+    /// Check if a security event matches any rules
+    fn check_event_against_rules(
+        event: &SecurityEvent,
+        rules: &Arc<RwLock<Vec<SecurityRule>>>,
+    ) -> Vec<SecurityAlert> {
+        let rules_read = rules.read().unwrap();
+        let mut triggered_alerts = Vec::new();
         
-        // Check if conditions match
-        let mut match_found = true;
-        
-        for (key, pattern) in &rule.conditions {
-            if let Some(value) = event.details.get(key) {
-                // In a real implementation, use proper regex matching
-                if !value.contains(pattern) {
+        for rule in rules_read.iter() {
+            // Check if event type matches
+            if rule.event_type != event.event_type {
+                continue;
+            }
+            
+            // Check if conditions match
+            let mut match_found = true;
+            
+            for (key, pattern) in &rule.conditions {
+                if let Some(value) = event.details.get(key) {
+                    // In a real implementation, use proper regex matching
+                    // Here we just use a simple contains check for demonstration
+                    if !value.contains(pattern) {
+                        match_found = false;
+                        break;
+                    }
+                } else {
                     match_found = false;
                     break;
                 }
-            } else {
-                match_found = false;
-                break;
             }
-        }
-        
-        if match_found {
-            // Create alert
-            let alert = SecurityAlert {
-                id: Uuid::new_v4().to_string(),
-                timestamp: event.timestamp,
-                rule_id: rule.id.clone(),
-                rule_name: rule.name.clone(),
-                agent_id: event.agent_id.clone(),
-                event_type: event.event_type.clone(),
-                severity: rule.severity,
-                description: format!("{}: {}", rule.name, event.description),
-                details: event.details.clone(),
-            };
             
-            triggered_alerts.push(alert);
-        }
-    }
-    
-    triggered_alerts
-}
-
-// Example REST API handler (simplified)
-async fn handle_api_request(manager: Arc<SecurityManager>, request: &str) -> String {
-    match request {
-        "get_agents" => {
-            let agents = manager.get_agent_statuses();
-            serde_json::to_string(&agents).unwrap_or_else(|_| "Error serializing agents".to_string())
-        },
-        "get_alerts" => {
-            let alerts = manager.get_recent_alerts(100);
-            serde_json::to_string(&alerts).unwrap_or_else(|_| "Error serializing alerts".to_string())
-        },
-        _ if request.starts_with("send_command:") => {
-            let parts: Vec<&str> = request.split(':').collect();
-            if parts.len() >= 3 {
-                let agent_id = parts[1];
-                let action = parts[2];
+            if match_found {
+                // Create alert
+                let alert = SecurityAlert {
+                    id: Uuid::new_v4().to_string(),
+                    timestamp: current_timestamp(),
+                    rule_id: rule.id.clone(),
+                    rule_name: rule.name.clone(),
+                    agent_id: event.agent_id.clone(),
+                    event_type: event.event_type.clone(),
+                    severity: rule.severity,
+                    description: format!("{}: {}", rule.name, event.description),
+                    details: event.details.clone(),
+                };
                 
-                let mut parameters = HashMap::new();
-                if parts.len() >= 4 {
-                    parameters.insert("command".to_string(), parts[3].to_string());
-                }
-                
-                match manager.send_command_to_agent(agent_id, action, parameters).await {
-                    Ok(command_id) => format!("Command sent successfully, ID: {}", command_id),
-                    Err(e) => format!("Error sending command: {}", e),
-                }
-            } else {
-                "Invalid command format".to_string()
+                triggered_alerts.push(alert);
             }
-        },
-        _ => "Unknown request".to_string(),
-    }
-}
-
-// Simple "web server" to handle API requests (for demonstration)
-async fn simple_api_server(manager: Arc<SecurityManager>) {
-    loop {
-        // In a real implementation, this would be a proper web framework like warp or actix-web
-        // For demonstration, we'll just handle a few hardcoded requests
-        
-        println!("\nAvailable commands:");
-        println!("1. get_agents");
-        println!("2. get_alerts");
-        println!("3. send_command:<agent_id>:exec:ls -la");
-        println!("4. send_command:<agent_id>:scan");
-        println!("5. exit");
-        
-        let mut input = String::new();
-        std::io::stdin().read_line(&mut input).unwrap();
-        let input = input.trim();
-        
-        if input == "exit" {
-            break;
         }
         
-        let response = handle_api_request(manager.clone(), input).await;
-        println!("Response: {}", response);
+        triggered_alerts
     }
-}
-
-mod common;
-
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    // Get NATS URL from environment or use default
-    let nats_url = std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
     
-    // Create manager
-    let manager = Arc::new(SecurityManager::new(&nats_url).await?);
+    /// Add a new security rule
+    pub fn add_rule(&self, rule: SecurityRule) -> Result<()> {
+        let mut rules_write = self.rules.write().unwrap();
+        rules_write.push(rule);
+        Ok(())
+    }
     
-    // Start manager services
-    let manager_clone = manager.clone();
-    let manager_task = task::spawn(async move {
-        if let Err(e) = manager_clone.start().await {
-            eprintln!("Manager error: {}", e);
-        }
-    });
-    
-    // Start API server
-    let api_task = task::spawn(async move {
-        simple_api_server(manager).await
-    });
-    
-    // Wait for both tasks to complete
-    let _ = tokio::try_join!(manager_task, api_task);
-    
-    Ok(())
+    /// Get a specific agent by ID
+    pub fn get_agent(&self, agent_id: &str) -> Option<AgentInfo> {
+        let agents_read = self.agents.read().unwrap();
+        agents_read.get(agent_id).cloned()
+    }
 }
