@@ -1,0 +1,11 @@
+sequenceDiagram
+    participant Manager
+    participant NATS
+    participant Integrations
+
+    Manager->>Manager: Check Event Against Rules
+    alt Rule Matches
+        Manager->>Manager: Create SecurityAlert
+        Manager->>NATS: SecurityAlert (security.alert)
+        NATS->>Integrations: Notify External Systems
+    end

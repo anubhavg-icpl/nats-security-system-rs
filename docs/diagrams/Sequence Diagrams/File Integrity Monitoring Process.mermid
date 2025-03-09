@@ -1,0 +1,17 @@
+sequenceDiagram
+    participant Agent
+    participant NATS
+    participant Manager
+
+    loop Every 5 minutes
+        Agent->>Agent: Check File Integrity
+        alt File Changed
+            Agent->>NATS: SecurityEvent (security.event.{agent_id})
+            NATS->>Manager: SecurityEvent
+            Manager->>Manager: Match Rules
+            alt Rule Matches
+                Manager->>Manager: Generate Alert
+                Manager->>NATS: SecurityAlert (security.alert)
+            end
+        end
+    end

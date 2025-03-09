@@ -1,0 +1,14 @@
+sequenceDiagram
+    participant Agent
+    participant NATS
+    participant Manager
+
+    Agent->>NATS: Register (security.register)
+    NATS->>Manager: AgentRegistration
+    Manager->>Manager: Store Agent Info
+
+    loop Every 60 seconds
+        Agent->>NATS: Heartbeat (security.heartbeat)
+        NATS->>Manager: AgentHeartbeat
+        Manager->>Manager: Update Agent Status
+    end

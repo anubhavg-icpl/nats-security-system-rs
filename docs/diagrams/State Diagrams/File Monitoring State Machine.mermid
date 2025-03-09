@@ -1,0 +1,6 @@
+stateDiagram-v2
+    [*] --> Idle
+    Idle --> Scanning : Scan Interval Elapsed
+    Scanning --> Idle : Scan Complete
+    Scanning --> Alerting : File Change Detected
+    Alerting --> Idle : Alert Sent

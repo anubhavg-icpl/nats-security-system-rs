@@ -1,0 +1,9 @@
+sequenceDiagram
+    participant Client
+    participant API
+    participant Manager
+
+    Client->>API: GET /api/alerts
+    API->>Manager: Retrieve Alerts
+    Manager->>API: Alerts Data
+    API->>Client: Alerts Response

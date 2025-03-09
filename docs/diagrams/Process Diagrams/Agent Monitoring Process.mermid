@@ -1,0 +1,11 @@
+flowchart TD
+    subgraph Agent
+        A1[File Change Detected] --> A2[Calculate File Hash]
+        A2 --> A3[Compare with Previous Hash]
+        A3 --> A4{Has Changed?}
+        A4 -- No --> A5[No Event Generated]
+        A4 -- Yes --> A6[Create SecurityEvent]
+        A6 --> A7[Determine Severity]
+        A7 --> A8[Prepare Event Payload]
+        A8 --> A9[Serialize to JSON]
+    end

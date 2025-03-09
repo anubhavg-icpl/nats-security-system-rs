@@ -1,0 +1,7 @@
+stateDiagram-v2
+    [*] --> Inactive
+    Inactive --> Registering : Start
+    Registering --> Active : Registration Successful
+    Active --> Inactive : No Heartbeat
+    Active --> Terminating : Shutdown Signal
+    Terminating --> Inactive : Termination Complete

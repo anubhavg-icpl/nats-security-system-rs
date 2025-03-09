@@ -1,0 +1,12 @@
+sequenceDiagram
+    participant API
+    participant Manager
+    participant NATS
+    participant Agent
+
+    API->>Manager: Command Request
+    Manager->>NATS: Command (security.command.{agent_id})
+    NATS->>Agent: AgentCommand
+    Agent->>NATS: CommandResponse (security.response.{agent_id})
+    NATS->>Manager: CommandResponse
+    Manager->>API: Command Result

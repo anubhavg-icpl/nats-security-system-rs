@@ -1,0 +1,12 @@
+flowchart TD
+    subgraph Manager
+        M1[Receive Event] --> M2[Deserialize JSON]
+        M2 --> M3[Log Event Receipt]
+        M3 --> M4[Check Against Rules]
+        M4 --> M5{Rules Match?}
+        M5 -- No --> M6[No Alert Generated]
+        M5 -- Yes --> M7[Create SecurityAlert]
+        M7 --> M8[Store Alert in Memory]
+        M8 --> M9[Prepare Alert Payload]
+        M9 --> M10[Serialize to JSON]
+    end

@@ -1,0 +1,34 @@
+erDiagram
+    AGENT {
+        string agent_id
+        string hostname
+        string os
+        string ip
+        string version
+        uint64 last_seen
+        string status
+        uint64 uptime
+        string[] capabilities
+    }
+    SECURITY_EVENT {
+        string agent_id
+        uint64 timestamp
+        string event_type
+        uint8 severity
+        string description
+        map details
+    }
+    SECURITY_ALERT {
+        string id
+        uint64 timestamp
+        string rule_id
+        string rule_name
+        string agent_id
+        string event_type
+        uint8 severity
+        string description
+        map details
+    }
+    AGENT ||--o{ SECURITY_EVENT : "generates"
+    AGENT ||--o{ SECURITY_ALERT : "triggers"
+    SECURITY_EVENT ||--o{ SECURITY_ALERT : "matches"

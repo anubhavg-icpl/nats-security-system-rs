@@ -1,0 +1,9 @@
+stateDiagram-v2
+    [*] --> Received
+    Received --> Processing : Deserialize Event
+    Processing --> Matching : Check Against Rules
+    Matching --> Alerting : Rule Matches
+    Matching --> Ignored : No Match
+    Alerting --> Completed : Alert Generated
+    Ignored --> Completed : Event Ignored
+    Completed --> [*]
