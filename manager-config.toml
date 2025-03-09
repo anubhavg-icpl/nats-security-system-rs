@@ -1,0 +1,12 @@
+# NATS connection settings
+[nats]
+url = "nats://localhost:4222"
+
+# API settings
+api_bind_address = "127.0.0.1"
+api_port = 8080
+admin_token = "your-secure-token-here"  # Set this to a secure random string
+
+# Agent monitoring settings
+agent_timeout_seconds = 300
+alert_retention_count = 1000

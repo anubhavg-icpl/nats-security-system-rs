@@ -1,0 +1,16 @@
+# NATS connection settings
+[nats]
+url = "nats://localhost:4222"
+
+# File monitoring settings
+[file_monitoring]
+enabled = true
+monitored_paths = [
+    { path = "/etc", recursive = false, severity_override = 5 }
+]
+excluded_paths = ["/etc/mtab", "/etc/resolv.conf"]
+ignore_temp_files = true
+
+# Operational settings
+scan_interval_seconds = 300
+heartbeat_interval_seconds = 60
