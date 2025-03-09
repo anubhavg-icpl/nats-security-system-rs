@@ -14,22 +14,22 @@ Here's a complete list of Mermaid diagrams for the NATS Security System:
 7. [Security Event Propagation Flow](diagrams/Communication%20Flow%20Diagrams/Security%20Event%20Propagation%20Flow.mermid)
 
 ## Sequence Diagrams
-8. Agent Registration and Heartbeat
-9. Command Execution Flow
-10. File Integrity Monitoring Process
-11. Rule-Based Alert Generation
-12. API Request Handling
+8. [Agent Registration and Heartbeat](diagrams/Sequence%20Diagrams/Agent%20Registration%20and%20Heartbeat.mermid)
+9. [Command Execution Flow](diagrams/Sequence%20Diagrams/Command%20Execution%20Flow.mermid)
+10. [File Integrity Monitoring Process](diagrams/Sequence%20Diagrams/File%20Integrity%20Monitoring%20Process.mermid)
+11. [Rule-Based Alert Generation](diagrams/Sequence%20Diagrams/Rule-Based%20Alert%20Generation.mermid)
+12. [API Request Handling](diagrams/Sequence%20Diagrams/API%20Request%20Handling.mermid)
 
 ## State Diagrams
-13. Agent Lifecycle States
-14. Security Event Processing States
-15. File Monitoring State Machine
+13. [Agent Lifecycle States](diagrams/State%20Diagrams/Agent%20Lifecycle%20States.mermid)
+14. [Security Event Processing States](diagrams/State%20Diagrams/Security%20Event%20Processing%20States.mermid)
+15. [File Monitoring State Machine](diagrams/State%20Diagrams/File%20Monitoring%20State%20Machine.mermid)
 
 ## Entity Relationship Diagrams
-16. Data Model Overview
+16. [Data Model Overview](diagrams/Entity%20Relationship%20Diagrams/Data%20Model%20Overview.mermid)
 
 ## Process Diagrams
-17. Security Rule Evaluation Process
-18. Agent Monitoring Process
+17. [Security Rule Evaluation Process](diagrams/Process%20Diagrams/Security%20Rule%20Evaluation%20Process.mermid)
+18. [Agent Monitoring Process](diagrams/Process%20Diagrams/Agent%20Monitoring%20Process.mermid)
 
 Which diagram would you like me to create first?
