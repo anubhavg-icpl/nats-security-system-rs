@@ -106,13 +106,17 @@ impl Default for AgentConfig {
 }
 
 // Default implementation for ManagerConfig
+// Default implementation for ManagerConfig
 impl Default for ManagerConfig {
     fn default() -> Self {
+        let admin_token = uuid::Uuid::new_v4().to_string();
+        println!("Generated Admin Token: {}", admin_token); // Print token during startup
+
         Self {
             nats: NatsConfig::default(),
             api_bind_address: "127.0.0.1".to_string(),
             api_port: 8080,
-            admin_token: uuid::Uuid::new_v4().to_string(),
+            admin_token,
             agent_timeout_seconds: 300,
             alert_retention_count: 1000,
             reconnect_attempts: 10,
@@ -120,6 +124,7 @@ impl Default for ManagerConfig {
         }
     }
 }
+
 
 // Default implementation for NatsConfig
 impl Default for NatsConfig {
