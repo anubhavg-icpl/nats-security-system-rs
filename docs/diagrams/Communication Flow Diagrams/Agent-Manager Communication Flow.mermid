@@ -1,0 +1,58 @@
+flowchart TB
+    subgraph Agents
+        A1[Agent 1]
+        A2[Agent 2]
+        A3[Agent 3]
+    end
+
+    subgraph "NATS Message Bus"
+        N["NATS Server"]
+    end
+
+    subgraph Manager
+        MS[Manager Service]
+        DB[(Alert Storage)]
+        RM[Rule Manager]
+        API[REST API]
+    end
+
+    %% Registration Flow
+    A1 -->|1. Register: security.register| N
+    A2 -->|1. Register: security.register| N
+    A3 -->|1. Register: security.register| N
+    N -->|AgentRegistration| MS
+    MS -->|Store Agent Info| DB
+
+    %% Heartbeat Flow
+    A1 -.->|2. Heartbeat: security.heartbeat| N
+    A2 -.->|2. Heartbeat: security.heartbeat| N
+    A3 -.->|2. Heartbeat: security.heartbeat| N
+    N -.->|AgentHeartbeat| MS
+    MS -.->|Update Agent Status| DB
+
+    %% Security Event Flow
+    A1 ==>|3. Event: security.event.{agent_id}| N
+    A2 ==>|3. Event: security.event.{agent_id}| N
+    A3 ==>|3. Event: security.event.{agent_id}| N
+    N ==>|SecurityEvent| MS
+    MS ==>|Match Rules| RM
+    RM ==>|Generate Alert| MS
+    MS ==>|Store Alert| DB
+    
+    %% Command Flow
+    API -->|4. Command Request| MS
+    MS -->|Command: security.command.{agent_id}| N
+    N -->|AgentCommand| A1
+    A1 -->|Response: security.response.{agent_id}| N
+    N -->|CommandResponse| MS
+    MS -->|Command Result| API
+
+    classDef agent fill:#d9f7be,stroke:#389e0d
+    classDef nats fill:#d6e4ff,stroke:#1d39c4
+    classDef manager fill:#f5f0ff,stroke:#722ed1
+    classDef storage fill:#fff2e8,stroke:#d4380d
+    
+    class A1,A2,A3 agent
+    class N nats
+    class MS,RM,API manager
+    class DB storage

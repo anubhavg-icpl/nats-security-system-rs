@@ -1,0 +1,65 @@
+flowchart TD
+    subgraph Agent[Agent Process]
+        A1[File Change Detected] --> A2[Calculate File Hash]
+        A2 --> A3[Compare with Previous Hash]
+        A3 --> A4{Has Changed?}
+        A4 -- No --> A5[No Event Generated]
+        A4 -- Yes --> A6[Create SecurityEvent]
+        A6 --> A7[Determine Severity]
+        A7 --> A8[Prepare Event Payload]
+        A8 --> A9[Serialize to JSON]
+    end
+
+    subgraph NATS[NATS Messaging System]
+        N1[Subject: security.event.{agent_id}]
+    end
+
+    subgraph Manager[Manager Process]
+        M1[Receive Event] --> M2[Deserialize JSON]
+        M2 --> M3[Log Event Receipt]
+        M3 --> M4[Check Against Rules]
+        M4 --> M5{Rules Match?}
+        M5 -- No --> M6[No Alert Generated]
+        M5 -- Yes --> M7[Create SecurityAlert]
+        M7 --> M8[Store Alert in Memory]
+        M8 --> M9[Prepare Alert Payload]
+        M9 --> M10[Serialize to JSON]
+    end
+    
+    subgraph API[API Server]
+        API1[GET /api/alerts]
+        API2[Alert Notifications]
+    end
+    
+    subgraph Integrations[External Integrations]
+        I1[SIEM Systems]
+        I2[Notification Systems]
+        I3[Incident Response Tools]
+    end
+
+    A9 -->|Publish| N1
+    N1 -->|Subscribe| M1
+    M10 -->|Publish| N2[Subject: security.alert]
+    N2 -->|Subscribe| I1
+    N2 -->|Subscribe| I2
+    N2 -->|Subscribe| I3
+    M8 --> API1
+    N2 -->|Trigger| API2
+
+    classDef agent fill:#c9e1f9,stroke:#4a86e8,stroke-width:2px
+    classDef nats fill:#c6f4de,stroke:#0f9d58,stroke-width:2px
+    classDef manager fill:#fce8b2,stroke:#f4b400,stroke-width:2px
+    classDef api fill:#f4c7c3,stroke:#db4437,stroke-width:2px
+    classDef integrations fill:#d4bdfa,stroke:#9334e6,stroke-width:2px
+    
+    class Agent agent
+    class NATS nats
+    class Manager manager
+    class API api
+    class Integrations integrations
+    
+    class A1,A2,A3,A4,A5,A6,A7,A8,A9 agent
+    class N1,N2 nats
+    class M1,M2,M3,M4,M5,M6,M7,M8,M9,M10 manager
+    class API1,API2 api
+    class I1,I2,I3 integrations

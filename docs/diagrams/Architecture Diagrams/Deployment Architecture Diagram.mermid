@@ -1,0 +1,69 @@
+flowchart TB
+    subgraph "Management Infrastructure"
+        subgraph "Manager Server"
+            manager["Security Manager\n(High Availability)"]
+            api["REST API Server"]
+            db[(Alert Database)]
+        end
+        
+        lb["Load Balancer"]
+        
+        subgraph "NATS Cluster"
+            nats1["NATS Server #1"]
+            nats2["NATS Server #2"]
+            nats3["NATS Server #3"]
+        end
+    end
+    
+    subgraph "Agent Deployments"
+        subgraph "DMZ"
+            web1["Web Server #1\n[Agent]"]
+            web2["Web Server #2\n[Agent]"]
+            proxy["Proxy Server\n[Agent]"]
+        end
+        
+        subgraph "Internal Network"
+            db1["Database Server\n[Agent]"]
+            db2["Backup Server\n[Agent]"]
+            app1["App Server #1\n[Agent]"]
+            app2["App Server #2\n[Agent]"]
+        end
+    end
+    
+    subgraph "Admin Access"
+        admin["Admin Workstation"]
+        soc["SOC Dashboard"]
+    end
+    
+    %% Connections
+    admin -- "HTTPS" --> lb
+    soc -- "HTTPS" --> lb
+    lb -- "HTTPS" --> api
+    api -- "Internal" --> manager
+    manager -- "SQL" --> db
+    
+    %% NATS connections
+    nats1 <--> nats2
+    nats2 <--> nats3
+    nats3 <--> nats1
+    
+    manager -- "Pub/Sub" --> nats1
+    manager -- "Pub/Sub" --> nats2
+    manager -- "Pub/Sub" --> nats3
+    
+    %% Agent connections
+    web1 -- "Pub/Sub" --> nats1
+    web2 -- "Pub/Sub" --> nats2
+    proxy -- "Pub/Sub" --> nats3
+    db1 -- "Pub/Sub" --> nats1
+    db2 -- "Pub/Sub" --> nats2
+    app1 -- "Pub/Sub" --> nats3
+    app2 -- "Pub/Sub" --> nats1
+    
+    classDef manager fill:#f96,stroke:#333,stroke-width:2px
+    classDef agent fill:#58f,stroke:#333,stroke-width:1px
+    classDef nats fill:#0f0,stroke:#333,stroke-width:2px
+    
+    class manager,api manager
+    class web1,web2,proxy,db1,db2,app1,app2 agent
+    class nats1,nats2,nats3 nats

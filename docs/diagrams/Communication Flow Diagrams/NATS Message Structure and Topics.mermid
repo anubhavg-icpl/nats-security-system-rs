@@ -1,0 +1,134 @@
+graph TB
+    subgraph "NATS Server"
+        Topics["Message Topics"]
+    end
+
+    subgraph "Topic Hierarchy"
+        Registration["security.register"]
+        Heartbeat["security.heartbeat"]
+        Command["security.command.*"]
+        Response["security.response.*"]
+        Event["security.event.*"]
+        Alert["security.alert"]
+    end
+
+    subgraph "Message Payloads"
+        %% Registration Message
+        RegPayload["AgentRegistration {
+            agent_id: string
+            hostname: string
+            os: string
+            ip: string
+            version: string
+        }"]
+
+        %% Heartbeat Message
+        HeartPayload["AgentHeartbeat {
+            agent_id: string
+            timestamp: uint64
+            status: string
+        }"]
+
+        %% Command Message
+        CmdPayload["AgentCommand {
+            id: string
+            action: string
+            parameters: Map<string, string>
+        }"]
+
+        %% Response Message
+        RespPayload["CommandResponse {
+            command_id: string
+            agent_id: string
+            status: string
+            data: string
+        }"]
+
+        %% Event Message
+        EventPayload["SecurityEvent {
+            agent_id: string
+            timestamp: uint64
+            event_type: string
+            severity: uint8
+            description: string
+            details: Map<string, string>
+        }"]
+
+        %% Alert Message
+        AlertPayload["SecurityAlert {
+            id: string
+            timestamp: uint64
+            rule_id: string
+            rule_name: string
+            agent_id: string
+            event_type: string
+            severity: uint8
+            description: string
+            details: Map<string, string>
+        }"]
+    end
+
+    %% Connect topics to their payloads
+    Registration --- RegPayload
+    Heartbeat --- HeartPayload
+    Command --- CmdPayload
+    Response --- RespPayload
+    Event --- EventPayload
+    Alert --- AlertPayload
+
+    %% Show Topic Naming Convention
+    Topics --- TopicConvention["Topic Naming Convention"]
+    TopicConvention --- BasicTopic["Basic Topic: security.<function>"]
+    TopicConvention --- AgentTopic["Agent-Specific Topic: security.<function>.<agent_id>"]
+
+    %% Example Wildcard Subscriptions
+    Topics --- Wildcards["Subscription Patterns"]
+    Wildcards --- AllEvents["Manager subscribes to all events: security.event.*"]
+    Wildcards --- AllAlerts["UI subscribes to all alerts: security.alert"]
+    Wildcards --- AgentCommands["Agent subscribes to its commands: security.command.<agent_id>"]
+
+    %% Common Messages
+    subgraph "Common Message Actions"
+        RegActions["Agent Registration (Once)"]
+        HeartActions["Agent Heartbeat (Every 60s)"]
+        CommandActions["Command Actions:
+            - exec: Execute shell command
+            - scan: Trigger integrity scan
+            - get_config: Retrieve agent config"]
+        EventTypes["Event Types:
+            - file_integrity: File change detected
+            - log_alert: Log pattern match
+            - system_audit: System change"]
+    end
+
+    %% Connect common messages to topics
+    RegActions --- Registration
+    HeartActions --- Heartbeat
+    CommandActions --- Command
+    EventTypes --- Event
+
+    %% Message flow
+    Agent1[/"Agent 1"/] -- "Publishes to" --> Registration
+    Agent1 -- "Publishes to" --> Heartbeat
+    Agent1 -- "Publishes to" --> Event
+    Agent1 -- "Publishes to" --> Response
+    
+    Manager[/"Manager"/] -- "Publishes to" --> Command
+    Manager -- "Publishes to" --> Alert
+    
+    Manager -- "Subscribes to" --> Registration
+    Manager -- "Subscribes to" --> Heartbeat
+    Manager -- "Subscribes to" --> Event
+    Manager -- "Subscribes to" --> Response
+    
+    Agent1 -- "Subscribes to" --> Command
+    
+    UI[/"API/UI"/] -- "Subscribes to" --> Alert
+
+    classDef topic fill:#f9f,stroke:#333,stroke-width:2px;
+    classDef payload fill:#bbf,stroke:#333,stroke-width:1px;
+    classDef component fill:#dfd,stroke:#333,stroke-width:2px;
+    
+    class Registration,Heartbeat,Command,Response,Event,Alert topic;
+    class RegPayload,HeartPayload,CmdPayload,RespPayload,EventPayload,AlertPayload payload;
+    class Agent1,Manager,UI component;

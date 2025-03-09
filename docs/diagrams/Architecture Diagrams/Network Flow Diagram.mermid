@@ -1,0 +1,62 @@
+flowchart TD
+    subgraph "External Network"
+        admin["Admin User\nWeb Browser"]
+    end
+    
+    subgraph "DMZ"
+        lb["Load Balancer\nPort 443"]
+        api["API Server\nPort 8080"]
+    end
+    
+    subgraph "Internal Network"
+        manager["Security Manager"]
+        
+        subgraph "NATS Messaging"
+            nats["NATS Server\nPort 4222/TCP\nTLS Port 4223/TCP"]
+        end
+        
+        db[(Alert Database\nPort 5432/TCP)]
+    end
+    
+    subgraph "Production Servers"
+        agent1["Agent (Web Server)\nPort 4222/TCP Client"]
+        agent2["Agent (DB Server)\nPort 4222/TCP Client"]
+        agent3["Agent (App Server)\nPort 4222/TCP Client"]
+    end
+    
+    %% Client to Load Balancer
+    admin -- "HTTPS\nPort 443/TCP\nAPI Requests" --> lb
+    lb -- "HTTPS\nPort 443/TCP\nAPI Responses" --> admin
+    
+    %% Load Balancer to API
+    lb -- "HTTP\nPort 8080/TCP\nForwarded Requests" --> api
+    api -- "HTTP\nPort 8080/TCP\nResponses" --> lb
+    
+    %% API to Manager
+    api -- "Internal API\nCommand Requests" --> manager
+    manager -- "Internal API\nCommand Results" --> api
+    
+    %% Manager to Database
+    manager -- "PostgreSQL Protocol\nPort 5432/TCP\nAlert Storage" --> db
+    
+    %% Manager to NATS
+    manager -- "NATS Protocol\nPort 4222/TCP\nCommand Publishing\nEvent Subscription" --> nats
+    
+    %% Agent to NATS
+    agent1 -- "NATS Protocol\nPort 4222/TCP\nRegistration\nHeartbeats\nEvents\nCommand Subscription" --> nats
+    agent2 -- "NATS Protocol\nPort 4222/TCP\nSimilar flows" --> nats
+    agent3 -- "NATS Protocol\nPort 4222/TCP\nSimilar flows" --> nats
+    
+    classDef client fill:#f96,stroke:#333,stroke-width:1px
+    classDef dmz fill:#fc9,stroke:#333,stroke-width:1px
+    classDef internal fill:#9cf,stroke:#333,stroke-width:1px
+    classDef messaging fill:#9f9,stroke:#333,stroke-width:1px
+    classDef database fill:#c9f,stroke:#333,stroke-width:1px
+    classDef production fill:#ff9,stroke:#333,stroke-width:1px
+    
+    class admin client
+    class lb,api dmz
+    class manager internal
+    class nats messaging
+    class db database
+    class agent1,agent2,agent3 production

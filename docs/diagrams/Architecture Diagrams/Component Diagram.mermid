@@ -1,0 +1,82 @@
+flowchart TB
+    %% Security Agent Components
+    subgraph "Security Agent"
+        direction TB
+        AgentCore[Agent Core]
+        FileMonitor[File Integrity Monitor]
+        CommandExecutor[Command Executor]
+        AgentConfiguration[Configuration Manager]
+        HeartbeatService[Heartbeat Service]
+        AgentNatsClient[NATS Client]
+        
+        AgentCore --> FileMonitor
+        AgentCore --> CommandExecutor
+        AgentCore --> HeartbeatService
+        AgentCore --> AgentConfiguration
+        AgentCore <--> AgentNatsClient
+    end
+    
+    %% Security Manager Components
+    subgraph "Security Manager"
+        direction TB
+        ManagerCore[Manager Core]
+        subgraph "Rule Engine"
+            RuleEvaluator[Rule Evaluator]
+            Conditions[Condition Matcher]
+            AlertGenerator[Alert Generator]
+        end
+        subgraph "API Layer"
+            AuthMiddleware[Authentication Middleware]
+            EndpointHandlers[API Endpoints]
+            ResponseFormatter[Response Formatter]
+        end
+        AgentRegistry[Agent Registry]
+        EventProcessor[Event Processor]
+        CommandService[Command Service]
+        ManagerConfiguration[Configuration Manager]
+        ManagerNatsClient[NATS Client]
+        
+        ManagerCore <--> RuleEvaluator
+        RuleEvaluator --> Conditions
+        RuleEvaluator --> AlertGenerator
+        ManagerCore <--> EndpointHandlers
+        EndpointHandlers --> AuthMiddleware
+        EndpointHandlers --> ResponseFormatter
+        ManagerCore <--> AgentRegistry
+        ManagerCore <--> EventProcessor
+        ManagerCore <--> CommandService
+        ManagerCore --> ManagerConfiguration
+        ManagerCore <--> ManagerNatsClient
+    end
+    
+    %% NATS Server
+    NATS[NATS Server]
+    
+    %% External Interfaces
+    Admin[Admin Interface]
+    Storage[(Persistent Storage)]
+    
+    %% Connections
+    AgentNatsClient <--> NATS
+    NATS <--> ManagerNatsClient
+    EndpointHandlers <--> Admin
+    ManagerCore <--> Storage
+    
+    %% Styling
+    classDef agent fill:#a8e6cf,stroke:#333,stroke-width:1px
+    classDef agentComp fill:#bef0d3,stroke:#333,stroke-width:1px
+    classDef manager fill:#ffd3b6,stroke:#333,stroke-width:1px
+    classDef managerComp fill:#ffe0d0,stroke:#333,stroke-width:1px
+    classDef ruleComp fill:#ffccb6,stroke:#333,stroke-width:1px
+    classDef apiComp fill:#f4c2a6,stroke:#333,stroke-width:1px
+    classDef nats fill:#dcedc1,stroke:#333,stroke-width:1px
+    classDef external fill:#ffaaa5,stroke:#333,stroke-width:1px
+    
+    class AgentCore agent
+    class FileMonitor,CommandExecutor,HeartbeatService,AgentConfiguration,AgentNatsClient agentComp
+    class ManagerCore manager
+    class AgentRegistry,EventProcessor,CommandService,ManagerConfiguration,ManagerNatsClient managerComp
+    class RuleEvaluator,Conditions,AlertGenerator ruleComp
+    class AuthMiddleware,EndpointHandlers,ResponseFormatter apiComp
+    class NATS nats
+    class Admin,Storage external

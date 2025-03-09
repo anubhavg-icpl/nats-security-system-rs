@@ -1,0 +1,59 @@
+flowchart TB
+    subgraph "Endpoint Systems"
+        Agent1[Security Agent]
+        Agent2[Security Agent]
+        Agent3[Security Agent]
+    end
+
+    subgraph "NATS Message Bus"
+        NATS[NATS Server]
+    end
+
+    subgraph "Management System"
+        ManagerCore[Manager Core]
+        RuleEngine[Rule Engine]
+        API[RESTful API]
+        subgraph "Storage"
+            Alerts[(Alert Storage)]
+            AgentDB[(Agent Registry)]
+        end
+    end
+
+    subgraph "External Systems"
+        Admin[Admin Dashboard]
+        SIEM[Security Information and Event Management]
+        Metrics[Metrics & Monitoring]
+    end
+
+    %% Agent connections
+    Agent1 -->|Events, Heartbeats| NATS
+    Agent2 -->|Events, Heartbeats| NATS
+    Agent3 -->|Events, Heartbeats| NATS
+    NATS -->|Commands| Agent1
+    NATS -->|Commands| Agent2
+    NATS -->|Commands| Agent3
+
+    %% Manager connections
+    NATS <-->|Bidirectional Communication| ManagerCore
+    ManagerCore --> RuleEngine
+    RuleEngine --> Alerts
+    ManagerCore --> AgentDB
+    ManagerCore --> API
+
+    %% External connections
+    API <--> Admin
+    API <--> SIEM
+    API <--> Metrics
+    
+    %% Styling
+    classDef agent fill:#a8e6cf,stroke:#333,stroke-width:2px
+    classDef nats fill:#dcedc1,stroke:#333,stroke-width:2px
+    classDef manager fill:#ffd3b6,stroke:#333,stroke-width:2px
+    classDef storage fill:#d9d9d9,stroke:#333,stroke-width:2px
+    classDef external fill:#ffaaa5,stroke:#333,stroke-width:2px
+    
+    class Agent1,Agent2,Agent3 agent
+    class NATS nats
+    class ManagerCore,RuleEngine,API manager
+    class Alerts,AgentDB storage
+    class Admin,SIEM,Metrics external
